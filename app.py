@@ -65,6 +65,26 @@ def stream():
         }
         
         if has_cookies:
+            # SANITIZATION: Ensure Linux-compatible line endings and valid header
+            try:
+                with open(cookie_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                
+                # Check Header
+                if not content.startswith("# Netscape") and not content.startswith("# HTTP"):
+                    print("WARNING: cookies.txt missing Netscape header! yt-dlp may fail.")
+                    cookie_status = "Invalid Header"
+                
+                # Convert CRLF to LF for Linux
+                if '\r\n' in content:
+                    print("Sanitizing cookies.txt (CRLF -> LF)")
+                    content = content.replace('\r\n', '\n')
+                    with open(cookie_file, 'w', encoding='utf-8') as f:
+                        f.write(content)
+            
+            except Exception as e:
+                print(f"Cookie Sanitize Error: {e}")
+
             ydl_opts['cookiefile'] = cookie_file
             print(f"Using cookies: {cookie_status}")
 
