@@ -69,23 +69,35 @@ def stream():
             print("File already exists in cache.")
             return jsonify({'url': f"{request.host_url}downloads/{video_id}.mp3"})
 
-        # Run SpotDL
-        # Using the YouTube URL directly to skip Spotify search
-        cmd = ["spotdl", url, "--output", output_template, "--overwrite", "force"]
+        # Run yt-dlp Direct Download (Lighter/Faster than SpotDL)
+        # Bypasses Python API weirdness by using CLI directly
+        cmd = [
+            "yt-dlp", 
+            "--extract-audio", 
+            "--audio-format", "mp3", 
+            "--output", f"downloads/{video_id}.%(ext)s",
+            "--no-playlist",
+            "--force-overwrites",    
+            url
+        ]
+        
+        # Add Anti-Bot Args
+        cmd.extend(["--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"])
         
         # Pass cookies if available
         cookie_file = 'cookies.txt'
         if os.path.exists(cookie_file):
-            cmd.extend(["--cookie-file", cookie_file])
+            cmd.extend(["--cookies", cookie_file])
             
-        subprocess.run(cmd, check=True, timeout=120)
+        print(f"Running download cmd: {cmd}")
+        subprocess.run(cmd, check=True, timeout=300) # 5 min timeout for download
         
         if os.path.exists(output_template):
-             print("SpotDL download success!")
+             print("Download success!")
              return jsonify({'url': f"{request.host_url}downloads/{video_id}.mp3"})
              
     except Exception as e_spot:
-        print(f"SpotDL failed: {e_spot}")
+        print(f"Download failed: {e_spot}")
 
     # 2. Fallback: yt-dlp Direct Stream (Fast)
     try:
