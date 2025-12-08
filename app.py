@@ -58,11 +58,6 @@ def stream():
             'no_warnings': True,
             'extract_flat': 'in_playlist',
             'verbose': True,
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['web']
-                }
-            },
             'http_headers': {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Accept-Language': 'en-US,en;q=0.9',
@@ -78,9 +73,22 @@ def stream():
             return jsonify({'url': info['url']})
             
     except Exception as e:
+        print(f"yt-dlp failed: {e}. Trying pytubefix...")
+        try:
+             from pytubefix import YouTube as PyTube
+             # Use po_token logic if available, but standard first
+             yt = PyTube(url)
+             stream = yt.streams.get_audio_only()
+             if stream:
+                 print("pytubefix success!")
+                 return jsonify({'url': stream.url})
+        except Exception as e2:
+             print(f"pytubefix failed: {e2}")
+
         # Return extended debug info in the error
         debug_info = {
             'error': str(e),
+            'pytube_error': str(locals().get('e2', 'Not attempted')),
             'cookie_status': locals().get('cookie_status', 'Unknown'),
             'cwd': os.getcwd(),
             'files_in_dir': os.listdir(os.getcwd())
