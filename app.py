@@ -1,10 +1,29 @@
 import os
-from flask import Flask, request, jsonify
+import glob
+import subprocess
+import time
+from flask import Flask, request, jsonify, send_from_directory
 from ytmusicapi import YTMusic
 import yt_dlp
 
 app = Flask(__name__)
 ytmusic = YTMusic()
+DOWNLOAD_FOLDER = "downloads"
+os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
+
+def cleanup_downloads():
+    # Remove files older than 10 minutes to save space
+    now = time.time()
+    for f in glob.glob(os.path.join(DOWNLOAD_FOLDER, "*")):
+        if os.stat(f).st_mtime < now - 600:
+            try:
+                os.remove(f)
+            except:
+                pass
+
+@app.route('/downloads/<path:filename>')
+def serve_file(filename):
+    return send_from_directory(DOWNLOAD_FOLDER, filename)
 
 @app.route('/search', methods=['GET'])
 def search():
@@ -13,9 +32,7 @@ def search():
         return jsonify({'error': 'No query provided'}), 400
     
     try:
-        # Search explicitly for songs
         results = ytmusic.search(query, filter='songs')
-        # Map to a simpler format compatible with Zenify
         mapped_results = []
         for item in results:
             if item['resultType'] == 'song':
@@ -37,87 +54,91 @@ def stream():
     if not video_id:
         return jsonify({'error': 'No id provided'}), 400
         
+    url = f"https://music.youtube.com/watch?v={video_id}"
+    cleanup_downloads()
+    
+    # 1. Try SpotDL Download (Proxy Mode) - Requested by User
+    # This is slower but bypasses "Client IP mismatch" and often Bot checks
     try:
-        url = f"https://music.youtube.com/watch?v={video_id}"
+        print(f"Attempting SpotDL download for {video_id}...")
+        output_template = os.path.join(DOWNLOAD_FOLDER, f"{video_id}.mp3")
         
+        # Check if already exists
+        if os.path.exists(output_template):
+            print("File already exists in cache.")
+            return jsonify({'url': f"{request.host_url}downloads/{video_id}.mp3"})
+
+        # Run SpotDL
+        # Using the YouTube URL directly to skip Spotify search
+        cmd = ["spotdl", url, "--output", output_template, "--overwrite", "force"]
+        
+        # Pass cookies if available
+        cookie_file = 'cookies.txt'
+        if os.path.exists(cookie_file):
+            cmd.extend(["--cookie-file", cookie_file])
+            
+        subprocess.run(cmd, check=True, timeout=120)
+        
+        if os.path.exists(output_template):
+             print("SpotDL download success!")
+             return jsonify({'url': f"{request.host_url}downloads/{video_id}.mp3"})
+             
+    except Exception as e_spot:
+        print(f"SpotDL failed: {e_spot}")
+
+    # 2. Fallback: yt-dlp Direct Stream (Fast)
+    try:
         # Check for cookies file
         cookie_file = 'cookies.txt'
         if not os.path.exists(cookie_file):
-             # Try absolute path just in case
              cookie_file = os.path.join(os.getcwd(), 'cookies.txt')
 
         has_cookies = os.path.exists(cookie_file)
-        cookie_status = "Missing"
-        if has_cookies:
-            size = os.path.getsize(cookie_file)
-            cookie_status = f"Found ({size} bytes) at {cookie_file}"
         
         ydl_opts = {
             'format': 'bestaudio/best',
             'quiet': True,
             'no_warnings': True,
-            'extract_flat': 'in_playlist',
             'verbose': True,
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['web']
+                }
+            },
             'http_headers': {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept-Language': 'en-US,en;q=0.9',
             }
         }
         
         if has_cookies:
-            # SANITIZATION: Ensure Linux-compatible line endings and valid header
+            # AUTO-SANITIZE
             try:
                 with open(cookie_file, 'r', encoding='utf-8') as f:
                     content = f.read()
-                
-                # Check Header
-                if not content.startswith("# Netscape") and not content.startswith("# HTTP"):
-                    print("WARNING: cookies.txt missing Netscape header! yt-dlp may fail.")
-                    cookie_status = "Invalid Header"
-                
-                # Convert CRLF to LF for Linux
                 if '\r\n' in content:
-                    print("Sanitizing cookies.txt (CRLF -> LF)")
                     content = content.replace('\r\n', '\n')
                     with open(cookie_file, 'w', encoding='utf-8') as f:
                         f.write(content)
+            except: pass
             
-            except Exception as e:
-                print(f"Cookie Sanitize Error: {e}")
-
             ydl_opts['cookiefile'] = cookie_file
-            print(f"Using cookies: {cookie_status}")
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             return jsonify({'url': info['url']})
             
     except Exception as e:
-        pytube_error = "Not attempted"
-        print(f"yt-dlp failed: {e}. Trying pytubefix...")
+        # 3. Fallback: Pytubefix
         try:
              from pytubefix import YouTube as PyTube
-             # Enable PO Token to bypass bot detection
-             # Use ANDROID client which is often more robust
              yt = PyTube(url, client='ANDROID', use_po_token=True)
              stream = yt.streams.get_audio_only()
              if stream:
-                 print("pytubefix success!")
                  return jsonify({'url': stream.url})
-        except Exception as e2:
-             pytube_error = str(e2)
-             print(f"pytubefix failed: {e2}")
-
-        # Return extended debug info in the error
-        debug_info = {
-            'error': str(e),
-            'pytube_error': pytube_error,
-            'cookie_status': locals().get('cookie_status', 'Unknown'),
-            'cwd': os.getcwd(),
-            'files_in_dir': os.listdir(os.getcwd())
-        }
-        print(f"Stream Error: {debug_info}")
-        return jsonify(debug_info), 500
+        except:
+             pass
+             
+        return jsonify({'error': str(e), 'spotdl_error': str(locals().get('e_spot', ''))}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)

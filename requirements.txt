@@ -3,3 +3,4 @@ ytmusicapi
 yt-dlp>=2023.11.16
 gunicorn
 pytubefix
+spotdl
