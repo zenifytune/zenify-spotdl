@@ -141,19 +141,6 @@ def stream():
             return jsonify({'url': info['url']})
             
     except Exception as e:
-        # 3. Fallback: Pytubefix
-        try:
-         try:
-              from pytubefix import YouTube as PyTube
-              # Disable PO Token (Interactive) to prevent hanging
-              # Try standard WEB client
-              yt = PyTube(url, client='WEB')
-              stream = yt.streams.get_audio_only()
-              if stream:
-                  return jsonify({'url': stream.url})
-        except:
-             pass
-             
         return jsonify({'error': str(e), 'spotdl_error': str(locals().get('e_spot', ''))}), 500
 
 if __name__ == '__main__':
