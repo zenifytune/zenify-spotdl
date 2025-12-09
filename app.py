@@ -57,7 +57,9 @@ def stream_song():
     headers = {
         'Accept': 'application/json',
         'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Origin': 'https://cobalt.tools',
+        'Referer': 'https://cobalt.tools/'
     }
     
     for instance in COBALT_INSTANCES:
@@ -69,35 +71,52 @@ def stream_song():
                 'downloadMode': 'audio',
                 'audioFormat': 'mp3'
             }
-            resp = requests.post(instance, json=payload, headers=headers, timeout=5)
+            # verify=False fixes 'sslip.io' self-signed cert error
+            resp = requests.post(instance, json=payload, headers=headers, timeout=10, verify=False)
             
             # Fallback to /api/json if root fails (V7 compatibility)
             if resp.status_code == 404:
-                 resp = requests.post(f"{instance}/api/json", json=payload, headers=headers, timeout=5)
+                 resp = requests.post(f"{instance}/api/json", json=payload, headers=headers, timeout=10, verify=False)
 
             if resp.status_code == 200:
                 data = resp.json()
                 if data.get('status') in ['stream', 'redirect'] and data.get('url'):
+                    print(f"Cobalt Success: {instance}")
                     return jsonify({'url': data['url']})
+            else:
+                print(f"Cobalt {instance} status {resp.status_code}: {resp.text[:100]}")
+
         except Exception as e:
             print(f"Cobalt {instance} failed: {e}")
             continue
 
     # 2. Try Piped Instances (Backup)
+    piped_headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+
     for instance in PIPED_INSTANCES:
         try:
             print(f"Trying Piped: {instance}")
-            resp = requests.get(f"{instance}/streams/{video_id}", headers=headers, timeout=5)
+            resp = requests.get(f"{instance}/streams/{video_id}", headers=piped_headers, timeout=10)
+            
             if resp.status_code == 200:
                 data = resp.json()
                 audio_streams = data.get('audioStreams', [])
+                
                 # Find mp4 audio
                 for stream in audio_streams:
                     if stream.get('mimeType') == 'audio/mp4':
+                        print(f"Piped Success: {instance}")
                         return jsonify({'url': stream['url']})
+                
                 # Fallback to any stream
                 if audio_streams:
+                     print(f"Piped Fallback Success: {instance}")
                      return jsonify({'url': audio_streams[0]['url']})
+            else:
+                 print(f"Piped {instance} status {resp.status_code}: {resp.text[:50]}")
+
         except Exception as e:
             print(f"Piped {instance} failed: {e}")
             continue
