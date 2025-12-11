@@ -1,4 +1,0 @@
-flask
-ytmusicapi
-gunicorn
-requests
